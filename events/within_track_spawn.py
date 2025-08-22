@@ -54,7 +54,12 @@ class SpawnOnTrackEvent:
         resampled_points = []
         for dist in sample_distances:
             idx = torch.searchsorted(cumulative_lengths, dist, right=False)
-            idx = torch.clamp(idx, 0, len(points_extended) - 2)
+            # If dist is greater than the last element of cumulative_lenghts, searchsorted will return idx value equal to len(cumulative_lenghts)
+            # So to avoid out of bound error. 
+            idx = torch.clamp(idx, 0, len(points_extended) - 2)  
+            if idx > 0 and cumulative_lengths[idx] > dist:
+                idx = idx - 1
+            
             
             t = (dist - cumulative_lengths[idx]) / (cumulative_lengths[idx + 1] - cumulative_lengths[idx] + 1e-8)
             t = torch.clamp(t, 0, 1)
@@ -192,6 +197,7 @@ class SpawnOnTrackEvent:
         right_pts = right_world[idx_range, rand_idx]
         
         # Random interpolation between boundaries
+        # Checkout different spawn variation in random_spawns.py
         alpha = torch.rand(num_envs, device=device) * (1 - 2*self.threshold) + self.threshold
         spawn_positions = left_pts * (1 - alpha[:, None]) + right_pts * alpha[:, None]
         

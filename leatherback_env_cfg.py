@@ -17,6 +17,7 @@ from isaaclab.assets import AssetBaseCfg
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 from isaaclab.actuators import ImplicitActuatorCfg
 import isaaclab.sim as sim_utils
+from isaaclab.sensors import CameraCfg
 
 from rewards.track_follow_reward import DistanceToCenterlineReward
 from termination.outside_track_termination import outside_track_bounds_termination
@@ -91,6 +92,16 @@ class LeatherbackSceneCfg(InteractiveSceneCfg):
     robot = RC_CONFIG.replace(prim_path="{ENV_REGEX_NS}/Robot")
 
 
+    chase_camera = CameraCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/Rigid_Bodies/Chassis/Camera_Chase",  # Path to existing camera
+        spawn=None,  # Camera already exists in USD
+        update_period=0.1,
+        height=480,
+        width=640,
+        data_types=["rgb"],
+    )
+
+
 @configclass 
 class ActionsCfg: 
 
@@ -151,9 +162,14 @@ class ObservationsCfg:
             },
         )
 
+        camera_obs = ObsTerm(
+            func=mdp.image,
+            params={"sensor_cfg": SceneEntityCfg("chase_camera")},
+        )        
+
         def __post_init__(self) -> None: 
             self.enable_corruption = False
-            self.concatenate_terms = True 
+            self.concatenate_terms = False 
 
     policy: PolicyCfg = PolicyCfg() 
 
