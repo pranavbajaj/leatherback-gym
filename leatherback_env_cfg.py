@@ -2,7 +2,7 @@ import math
 import torch
 
 import isaaclab.envs.mdp as mdp 
-from isaaclab.envs import ManagerBasedEnv, ManagerBasedEnvCfg
+from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
@@ -18,8 +18,8 @@ from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 from isaaclab.actuators import ImplicitActuatorCfg
 import isaaclab.sim as sim_utils
 
-from rewards.track_following_reward import DistanceToCenterlineReward
-from termination.outside_track_termination import OutsideTrackBoundsTermination
+from rewards.track_follow_reward import DistanceToCenterlineReward
+from termination.outside_track_termination import outside_track_bounds_termination
 from events.within_track_spawn import SpawnOnTrackEvent
 
 
@@ -164,6 +164,7 @@ class EventCfg:
 
     spawn_robot = EventTerm(
         func=SpawnOnTrackEvent(threshold=0.1),
+        mode="reset",
         params={},  # any extra parameters
     )
 
@@ -201,13 +202,14 @@ class TerminationsCfg:
     
     time_out = DoneTerm(
         func=mdp.time_out, 
-        params={"max_steps": 500}
+        time_out=True
         )
 
     outside_track_bounds = DoneTerm(
-        func=OutsideTrackBoundsTermination(), 
+        func=outside_track_bounds_termination, 
         params={}
-        )
+    )
+
 
 
 
