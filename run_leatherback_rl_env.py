@@ -56,7 +56,7 @@ def main():
     # print(curr_action.size())
     
     # curr_action[:, :2] = torch.randint(low=-2, high=3, size=(env_cfg.scene.num_envs, 2), dtype=torch.float32)    # Position, consider scaling factor of 0.1
-    curr_action[:, 2:] = torch.randint(low=0, high=3, size=(env_cfg.scene.num_envs, 4), dtype=torch.float32)
+    curr_action[:, 2:] = torch.randint(low=3, high=5, size=(env_cfg.scene.num_envs, 4), dtype=torch.float32)
 
     # stage = env.sim.stage
     # robot_prim = stage.GetPrimAtPath("/World/envs/env_0/Robot")
@@ -81,7 +81,7 @@ def main():
 
             # camera = env.scene["chase_camera"]
             # rgb_data = camera.data.output["rgb"]  # (num_envs, H, W, 3)
-            # print(f"image data sizes: {rgb_data.size()}")
+            # # print(f"image data sizes: {rgb_data.size()}")
 
             # save_dir = "camera_output"
             # os.makedirs(save_dir, exist_ok=True)
@@ -97,7 +97,7 @@ def main():
             #     # Save image
             #     Image.fromarray(img).save(f"{save_dir}/env_{i}_{count}_camera.png")
                 
-            # print(f"Saved camera images to {save_dir}/")
+            # # print(f"Saved camera images to {save_dir}/")
 
             count += 1
 

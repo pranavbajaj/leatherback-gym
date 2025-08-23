@@ -21,7 +21,7 @@ from isaaclab.sensors import CameraCfg
 
 from rewards.track_follow_reward import DistanceToCenterlineReward
 from termination.outside_track_termination import outside_track_bounds_termination
-from events.within_track_spawn import SpawnOnTrackEvent
+from events.within_centerline_spawn import SpawnOnTrackEvent
 
 
 RC_CONFIG = ArticulationCfg(
@@ -75,80 +75,7 @@ RC_CONFIG = ArticulationCfg(
     },
 )
 
-def quaternion_multiply(q1, q2):
-    """Multiply two quaternions (w, x, y, z format)."""
-    w1, x1, y1, z1 = q1
-    w2, x2, y2, z2 = q2
-    
-    w = w1*w2 - x1*x2 - y1*y2 - z1*z2
-    x = w1*x2 + x1*w2 + y1*z2 - z1*y2
-    y = w1*y2 - x1*z2 + y1*w2 + z1*x2
-    z = w1*z2 + x1*y2 - y1*x2 + z1*w2
-    
-    return [w, x, y, z]
 
-def create_tilted_camera(tilt_degrees=10, camera_name="front_camera"):
-    """
-    Create a camera configuration with custom downward tilt.
-    
-    Args:
-        tilt_degrees: Degrees to tilt downward (positive = down)
-        camera_name: Name for the camera
-    """
-    # Calculate quaternion for desired tilt
-    tilt_rad = np.radians(tilt_degrees)
-    
-    # Base quaternion (forward-facing in ROS)
-    base = [0.5, -0.5, 0.5, -0.5]
-    
-    # Tilt quaternion
-    tilt = [
-        np.cos(tilt_rad / 2),
-        np.sin(tilt_rad / 2),
-        0,
-        0
-    ]
-    
-    # Combine
-    final = quaternion_multiply(base, tilt)
-    
-    # return CameraCfg(
-    #     prim_path=f"{{ENV_REGEX_NS}}/Robot/Rigid_Bodies/Chassis/{camera_name}",
-    #     update_period=0.1,
-    #     height=480,
-    #     width=640,
-    #     data_types=["rgb", "distance_to_image_plane"],
-    #     spawn=sim_utils.PinholeCameraCfg(
-    #         focal_length=24.0,
-    #         focus_distance=400.0,
-    #         horizontal_aperture=20.955,
-    #         clipping_range=(0.1, 1.0e5)
-    #     ),
-    #     offset=CameraCfg.OffsetCfg(
-    #         pos=(10, 0.0, 30),  # Adjust position as needed
-    #         rot=tuple(final),  # Computed quaternion
-    #         convention="ros"
-    #     ),
-    # )
-
-    return CameraCfg(
-        prim_path=f"{{ENV_REGEX_NS}}/Robot/Rigid_Bodies/Chassis/{camera_name}",
-        update_period=0.1,
-        height=480,
-        width=848,
-        data_types=["rgb"],
-        spawn=sim_utils.PinholeCameraCfg(
-            focal_length=14.0,
-            focus_distance=200.0,
-            horizontal_aperture=16.0,
-            clipping_range=(0.05, 100.0)
-        ),
-        offset=CameraCfg.OffsetCfg(
-            pos=(10, 0.0, 30),  # Adjust position as needed
-            rot=tuple(final),  # Computed quaternion
-            convention="ros"
-        ),
-    )
 
 @configclass 
 class LeatherbackSceneCfg(InteractiveSceneCfg): 
@@ -169,7 +96,7 @@ class LeatherbackSceneCfg(InteractiveSceneCfg):
     chase_camera = CameraCfg(
         prim_path="{ENV_REGEX_NS}/Robot/Rigid_Bodies/Chassis/Camera_Chase",  # Path to existing camera
         spawn=None,  # Camera already exists in USD
-        update_period=0.1,
+        update_period=0.0, # 0.0 make sure it updates every sim step.
         height=240,
         width=320,
         data_types=["rgb"],
@@ -268,10 +195,15 @@ class EventCfg:
 class RewardsCfg:
     """Reward terms for the MDP."""
 
+    
+    # Reward for staying alive 
+    alive = RewTerm(
+        func=mdp.is_alive,  # Returns 1 if not terminated
+        weight=0.1
+    )
+
     ## Follow center line reward 
     # distance_to_centerline: DistanceToCenterlineReward = DistanceToCenterlineReward()
-
-
     distance_to_centerline = RewTerm(
         func=DistanceToCenterlineReward(), 
         weight=1.0
@@ -280,7 +212,7 @@ class RewardsCfg:
     ## Positive reward for cars speed 
     car_vel = RewTerm(
         func = mdp.joint_vel_l1, 
-        weight = 0.1, 
+        weight = 2.0, 
         params={"asset_cfg": SceneEntityCfg("robot", 
                                             joint_names=[
                                                 "Wheel__Knuckle__Front_Left",
@@ -289,15 +221,40 @@ class RewardsCfg:
                                                 "Wheel__Upright__Rear_Left",
                                             ])}, 
         )
+    
+    # ========== PENALTIES ==========
+    
+    # Joint acceleration penalty (smoothness)
+    joint_acc = RewTerm(
+        func=mdp.joint_acc_l2,
+        weight=-0.1,
+        params={"asset_cfg": SceneEntityCfg("robot")}
+    )
+
+
+    # Steering limits penalty
+    joint_limits = RewTerm(
+        func=mdp.joint_pos_limits,
+        weight=-0.15,
+        params={"asset_cfg": SceneEntityCfg("robot",
+                                           joint_names=["Knuckle__Upright__Front_Right",
+                                                       "Knuckle__Upright__Front_Left"])}
+    )
+
+    termination = RewTerm(
+        func=mdp.is_terminated,  # Returns 1 when terminated
+        weight=-10.0  # Large negative weight
+    )
 
 
 @configclass
 class TerminationsCfg:
     
-    time_out = DoneTerm(
-        func=mdp.time_out, 
-        time_out=True
-        )
+    # If you are adding termination penality in reward, don't add time_out 
+    # time_out = DoneTerm(
+    #     func=mdp.time_out, 
+    #     time_out=True
+    #     )
 
     outside_track_bounds = DoneTerm(
         func=outside_track_bounds_termination, 
@@ -329,6 +286,6 @@ class LeatherbackEnvCfg(ManagerBasedRLEnvCfg):
         self.viewer.eye = (8.0, 0.0, 5.0)
         # simulation settings
         # self.sim.dt = 1 / 120
-        self.sim.dt = 1 / 200
+        self.sim.dt = 1 / 120
         self.sim.render_interval = self.decimation
 

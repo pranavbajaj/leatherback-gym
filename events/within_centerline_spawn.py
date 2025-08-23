@@ -9,12 +9,10 @@ class SpawnOnTrackEvent:
     Orients robots along the track direction using multi-point tangent estimation.
     """
     def __init__(self, threshold=0.1, num_samples=200, add_yaw_noise=False):
-        self.left_line_local = None  # Track boundaries in env_0 local coordinates
-        self.right_line_local = None
+        self.center_line_local = None  # Track centerline in env_0 local coordinates
         self.threshold = threshold
         self.num_samples = num_samples
-        self.left_resampled = None
-        self.right_resampled = None
+        self.center_resampled = None
         self.add_yaw_noise = add_yaw_noise # Whether to add small random variations to orientation
     
     def resample_curve(self, points, num_samples):
@@ -115,69 +113,44 @@ class SpawnOnTrackEvent:
             env_ids = torch.tensor(env_ids, device=device)
         
         num_envs = len(env_ids)
-        
-        # Load and transform track boundaries once
-        if self.left_resampled is None or self.right_resampled is None:
+
+        #Load and transform track centerline once 
+        if self.center_resampled is None: 
             stage = env.sim.stage
             
-            
-            # Try to load track boundaries with proper transformation
-            self.left_line_local = self.load_and_transform_boundary(
-                stage, "/World/envs/env_0/Track/TrackCenterLine/ID11", device
-            )
-            self.right_line_local = self.load_and_transform_boundary(
-                stage, "/World/envs/env_0/Track/TrackCenterLine/ID19", device
-            )
-            
-            print(f"[SpawnOnTrackEvent] Loaded boundaries ID11 and ID19 (relative to env_0)")
-                
-            # Resample boundaries
-            self.left_resampled = self.resample_curve(self.left_line_local, self.num_samples)
-            self.right_resampled = self.resample_curve(self.right_line_local, self.num_samples)
-        
+            # Try to load track centerline with proper transformation
+            self.center_line_local = self.load_and_transform_boundary(
+                stage, "/World/envs/env_0/Track/TrackCenterLine/ID3", device
+            ) 
+
+            print(f"[SpawnOnTrackEvent] Loaded centerline ID3 (relative to env_0)")
+
+            # Resample centerline
+            self.center_resampled = self.resample_curve(self.center_line_local, self.num_samples)
+
         # Get environment origins for world positioning
         env_origins = env.scene.env_origins[env_ids.long()][:, :2]  # XY only
-        
-        # Transform boundaries to world coordinates for each environment
-        left_world = self.left_resampled[None, :, :] + env_origins[:, None, :]
-        right_world = self.right_resampled[None, :, :] + env_origins[:, None, :]
-        
-        # Pick random indices along track
-        rand_idx = torch.randint(0, self.num_samples, (num_envs,), device=device)
-        
+
+        center_world = self.center_resampled[None, :, :] + env_origins[:, None, :]
+
         # Get corresponding points on boundaries
         idx_range = torch.arange(num_envs, device=device)
-        left_pts = left_world[idx_range, rand_idx]
-        right_pts = right_world[idx_range, rand_idx]
-        
-        # Random interpolation between boundaries
-        # Checkout different spawn variation in random_spawns.py
-        alpha = torch.rand(num_envs, device=device) * (1 - 2*self.threshold) + self.threshold
-        spawn_positions = left_pts * (1 - alpha[:, None]) + right_pts * alpha[:, None]
-        
-        # Calculate orientation from track direction using finite differences
-        # We'll use the track centerline to determine forward direction
-        
+
         # Get a small step forward and backward for finite difference
-        step_size = 5  # Use points a few steps away for better tangent estimation
-        
+        step_size = 2  # Use points a few steps away for better tangent estimation
+        # Pick random indices along track
+        rand_idx = torch.randint(0, self.num_samples, (num_envs,), device=device)
         # Forward and backward indices with wrapping for closed tracks
         forward_idx = (rand_idx + step_size) % self.num_samples
         backward_idx = (rand_idx - step_size) % self.num_samples
-        
+
         # Get the centerline points at current, forward, and backward positions
-        current_center = (left_pts + right_pts) / 2.0
-        
-        # Get forward centerline point
-        left_forward = left_world[idx_range, forward_idx]
-        right_forward = right_world[idx_range, forward_idx]
-        forward_center = (left_forward + right_forward) / 2.0
-        
-        # Get backward centerline point
-        left_backward = left_world[idx_range, backward_idx]
-        right_backward = right_world[idx_range, backward_idx]
-        backward_center = (left_backward + right_backward) / 2.0
-        
+        current_center = center_world[idx_range, rand_idx]
+        forward_center = center_world[idx_range, forward_idx]
+        backward_center = center_world[idx_range, backward_idx]
+
+        spawn_positions = current_center 
+
         # Calculate tangent using central finite difference
         # This gives us the direction of the track at the spawn point
         track_tangent = forward_center - backward_center
@@ -185,31 +158,26 @@ class SpawnOnTrackEvent:
         # Normalize the tangent vector
         tangent_norm = track_tangent.norm(dim=-1, keepdim=True)
         track_tangent = track_tangent / (tangent_norm + 1e-8)
-        
+
         # For very small tangent norms (straight sections or errors), use simple forward difference
         small_tangent_mask = tangent_norm.squeeze() < 1e-4
         if small_tangent_mask.any():
             # Fallback: use immediate next point
             next_idx = (rand_idx + 1) % self.num_samples
-            left_next = left_world[idx_range, next_idx]
-            right_next = right_world[idx_range, next_idx]
-            next_center = (left_next + right_next) / 2.0
-            
+            next_center = center_world[idx_range, next_idx]
+
             fallback_tangent = next_center - current_center
             fallback_tangent = fallback_tangent / (fallback_tangent.norm(dim=-1, keepdim=True) + 1e-8)
-            
+
             # Replace invalid tangents with fallback
             track_tangent = torch.where(
                 small_tangent_mask.unsqueeze(-1),
                 fallback_tangent,
                 track_tangent
             )
+
         
-        # Debug: Check if track tangent makes sense
-        # You can uncomment these lines to debug orientation issues
-        # print(f"[SpawnOnTrackEvent] Track tangents: {track_tangent[:5]}")  # First 5 for debugging
-        # print(f"[SpawnOnTrackEvent] Tangent norms: {tangent_norm.squeeze()[:5]}")
-        
+
         # Compute yaw angle from tangent vector
         # atan2(y, x) gives angle from positive x-axis
         yaws = torch.atan2(track_tangent[:, 1], track_tangent[:, 0])
@@ -219,11 +187,11 @@ class SpawnOnTrackEvent:
             yaw_noise_std = 0.05  # Reduced to ~3 degrees for better track following
             yaw_noise = torch.randn(num_envs, device=device) * yaw_noise_std
             yaws = yaws + yaw_noise
-        
+
         # Create robot poses
         robot_entity = env.scene["robot"]
         z_height = 0.05
-        
+
         # Position
         new_positions = torch.zeros((num_envs, 3), device=device)
         new_positions[:, :2] = spawn_positions
@@ -245,3 +213,4 @@ class SpawnOnTrackEvent:
         robot_entity.write_root_velocity_to_sim(zero_velocities, env_ids=env_ids)
         
         print(f"[SpawnOnTrackEvent] Spawned {num_envs} robots on track")
+        
