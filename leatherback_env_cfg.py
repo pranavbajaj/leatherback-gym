@@ -1,6 +1,6 @@
 import math 
 import torch
-
+import numpy as np 
 import isaaclab.envs.mdp as mdp 
 from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab.managers import EventTermCfg as EventTerm
@@ -75,6 +75,80 @@ RC_CONFIG = ArticulationCfg(
     },
 )
 
+def quaternion_multiply(q1, q2):
+    """Multiply two quaternions (w, x, y, z format)."""
+    w1, x1, y1, z1 = q1
+    w2, x2, y2, z2 = q2
+    
+    w = w1*w2 - x1*x2 - y1*y2 - z1*z2
+    x = w1*x2 + x1*w2 + y1*z2 - z1*y2
+    y = w1*y2 - x1*z2 + y1*w2 + z1*x2
+    z = w1*z2 + x1*y2 - y1*x2 + z1*w2
+    
+    return [w, x, y, z]
+
+def create_tilted_camera(tilt_degrees=10, camera_name="front_camera"):
+    """
+    Create a camera configuration with custom downward tilt.
+    
+    Args:
+        tilt_degrees: Degrees to tilt downward (positive = down)
+        camera_name: Name for the camera
+    """
+    # Calculate quaternion for desired tilt
+    tilt_rad = np.radians(tilt_degrees)
+    
+    # Base quaternion (forward-facing in ROS)
+    base = [0.5, -0.5, 0.5, -0.5]
+    
+    # Tilt quaternion
+    tilt = [
+        np.cos(tilt_rad / 2),
+        np.sin(tilt_rad / 2),
+        0,
+        0
+    ]
+    
+    # Combine
+    final = quaternion_multiply(base, tilt)
+    
+    # return CameraCfg(
+    #     prim_path=f"{{ENV_REGEX_NS}}/Robot/Rigid_Bodies/Chassis/{camera_name}",
+    #     update_period=0.1,
+    #     height=480,
+    #     width=640,
+    #     data_types=["rgb", "distance_to_image_plane"],
+    #     spawn=sim_utils.PinholeCameraCfg(
+    #         focal_length=24.0,
+    #         focus_distance=400.0,
+    #         horizontal_aperture=20.955,
+    #         clipping_range=(0.1, 1.0e5)
+    #     ),
+    #     offset=CameraCfg.OffsetCfg(
+    #         pos=(10, 0.0, 30),  # Adjust position as needed
+    #         rot=tuple(final),  # Computed quaternion
+    #         convention="ros"
+    #     ),
+    # )
+
+    return CameraCfg(
+        prim_path=f"{{ENV_REGEX_NS}}/Robot/Rigid_Bodies/Chassis/{camera_name}",
+        update_period=0.1,
+        height=480,
+        width=848,
+        data_types=["rgb"],
+        spawn=sim_utils.PinholeCameraCfg(
+            focal_length=14.0,
+            focus_distance=200.0,
+            horizontal_aperture=16.0,
+            clipping_range=(0.05, 100.0)
+        ),
+        offset=CameraCfg.OffsetCfg(
+            pos=(10, 0.0, 30),  # Adjust position as needed
+            rot=tuple(final),  # Computed quaternion
+            convention="ros"
+        ),
+    )
 
 @configclass 
 class LeatherbackSceneCfg(InteractiveSceneCfg): 
@@ -96,10 +170,14 @@ class LeatherbackSceneCfg(InteractiveSceneCfg):
         prim_path="{ENV_REGEX_NS}/Robot/Rigid_Bodies/Chassis/Camera_Chase",  # Path to existing camera
         spawn=None,  # Camera already exists in USD
         update_period=0.1,
-        height=480,
-        width=640,
+        height=240,
+        width=320,
         data_types=["rgb"],
     )
+
+    # driver_camera = create_tilted_camera(-5, "Driver_camera")
+
+    
 
 
 @configclass 
@@ -250,6 +328,7 @@ class LeatherbackEnvCfg(ManagerBasedRLEnvCfg):
         # viewer settings
         self.viewer.eye = (8.0, 0.0, 5.0)
         # simulation settings
-        self.sim.dt = 1 / 120
+        # self.sim.dt = 1 / 120
+        self.sim.dt = 1 / 200
         self.sim.render_interval = self.decimation
 

@@ -15,7 +15,7 @@ class SpawnOnTrackEvent:
         self.num_samples = num_samples
         self.left_resampled = None
         self.right_resampled = None
-        self.add_yaw_noise = add_yaw_noise  # Whether to add small random variations to orientation
+        self.add_yaw_noise = add_yaw_noise # Whether to add small random variations to orientation
     
     def resample_curve(self, points, num_samples):
         """

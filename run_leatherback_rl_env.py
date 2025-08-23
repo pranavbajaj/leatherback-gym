@@ -79,25 +79,25 @@ def main():
 
             obs, rew, terminated, truncated, info = env.step(curr_action)
 
-            camera = env.scene["chase_camera"]
-            rgb_data = camera.data.output["rgb"]  # (num_envs, H, W, 3)
-            print(f"image data sizes: {rgb_data.size()}")
+            # camera = env.scene["chase_camera"]
+            # rgb_data = camera.data.output["rgb"]  # (num_envs, H, W, 3)
+            # print(f"image data sizes: {rgb_data.size()}")
 
-            save_dir = "camera_output"
-            os.makedirs(save_dir, exist_ok=True)
+            # save_dir = "camera_output"
+            # os.makedirs(save_dir, exist_ok=True)
 
-            rgb_numpy = rgb_data.cpu().numpy()
-            for i in range(min(4, rgb_numpy.shape[0])):  # Save first 4 envs
-                img = rgb_numpy[i]
+            # rgb_numpy = rgb_data.cpu().numpy()
+            # for i in range(min(4, rgb_numpy.shape[0])):  # Save first 4 envs
+            #     img = rgb_numpy[i]
                 
-                # Convert to uint8 if normalized
-                if img.max() <= 1.0:
-                    img = (img * 255).astype(np.uint8)
+            #     # Convert to uint8 if normalized
+            #     if img.max() <= 1.0:
+            #         img = (img * 255).astype(np.uint8)
                 
-                # Save image
-                Image.fromarray(img).save(f"{save_dir}/env_{i}_{count}_camera.png")
+            #     # Save image
+            #     Image.fromarray(img).save(f"{save_dir}/env_{i}_{count}_camera.png")
                 
-            print(f"Saved camera images to {save_dir}/")
+            # print(f"Saved camera images to {save_dir}/")
 
             count += 1
 
