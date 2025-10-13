@@ -1,3 +1,4 @@
+
 import math 
 import torch
 import numpy as np 
@@ -22,6 +23,7 @@ from isaaclab.sensors import CameraCfg
 from rewards.track_follow_reward import DistanceToCenterlineReward
 from termination.outside_track_termination import outside_track_bounds_termination
 from events.within_centerline_spawn import SpawnOnTrackEvent
+from rewards.speed_reward import speed_magnitude_reward_local
 
 
 RC_CONFIG = ArticulationCfg(
@@ -75,8 +77,6 @@ RC_CONFIG = ArticulationCfg(
     },
 )
 
-
-
 @configclass 
 class LeatherbackSceneCfg(InteractiveSceneCfg): 
     ground = AssetBaseCfg(prim_path="/World/gridroom_curved", spawn=sim_utils.GroundPlaneCfg())
@@ -102,82 +102,87 @@ class LeatherbackSceneCfg(InteractiveSceneCfg):
         data_types=["rgb"],
     )
 
-    # driver_camera = create_tilted_camera(-5, "Driver_camera")
-
-    
-
-
 @configclass 
 class ActionsCfg: 
 
     joint_position = mdp.JointPositionActionCfg(
         asset_name="robot", 
         joint_names=["Knuckle__Upright__Front.*"], 
-        scale=0.1, 
+        scale=0.6, 
         clip={
-            "Knuckle__Upright__Front_Right": (float(-0.75),float(0.75)),
-            "Knuckle__Upright__Front_Left": (float(-0.75),float(0.75)),
+            "Knuckle__Upright__Front_Right": (float(-0.6),float(0.6)),
+            "Knuckle__Upright__Front_Left": (float(-0.6),float(0.6)),
         }
     )
 
     joint_velocity = mdp.JointVelocityActionCfg(
         asset_name="robot", 
         joint_names=["Wheel.*"], 
-        scale = 10.0, 
+        scale = 30.0, 
         clip={
-            "Wheel__Knuckle__Front_Left": (float(-50),float(50)),
-            "Wheel__Knuckle__Front_Right": (float(-50),float(50)) ,
-            "Wheel__Upright__Rear_Right": (float(-50),float(50)),
-            "Wheel__Upright__Rear_Left": (float(-50),float(50)),
+            "Wheel__Knuckle__Front_Left": (float(-30),float(30)),   ## Can set to [-30, 30] 
+            "Wheel__Knuckle__Front_Right": (float(-30),float(30)),
+            "Wheel__Upright__Rear_Right": (float(-30),float(30)),
+            "Wheel__Upright__Rear_Left": (float(-30),float(30)),
         }, 
     )
     
 @configclass
-class ObservationsCfg: 
-
+class ObservationsCfg:
 
     @configclass 
     class PolicyCfg(ObsGroup): 
 
-
-        joint_pos_rel = ObsTerm(
+        # Steering angle
+        steering_pos = ObsTerm(
             func=mdp.joint_pos_rel,
-            params = {
-                "asset_cfg": SceneEntityCfg(
-                    name = 'robot', 
-                    joint_names = [
-                        "Knuckle__Upright__Front_Right",
-                        "Knuckle__Upright__Front_Left",
-                    ]
-                )
-            },
+            params={"asset_cfg": SceneEntityCfg("robot", 
+                                              joint_names=["Knuckle__Upright__Front.*"])},
+            scale=1.0/0.6
         )
-        joint_vel_rel = ObsTerm(
-            func=mdp.joint_vel_rel,
-            params = {
-                "asset_cfg": SceneEntityCfg(
-                    name = 'robot', 
-                    joint_names = [
-                        "Wheel__Knuckle__Front_Left",
-                        "Wheel__Knuckle__Front_Right",
-                        "Wheel__Upright__Rear_Right",
-                        "Wheel__Upright__Rear_Left",
-                    ]
-                )
-            },
-        )
+
+        # Wheel velocities
+        # wheel_vel = ObsTerm(
+        #     func=mdp.joint_vel_rel,
+        #     params={"asset_cfg": SceneEntityCfg("robot", 
+        #                                       joint_names=["Wheel.*"])},
+        #     scale=1.0/30.0
+        # )
 
         camera_obs = ObsTerm(
             func=mdp.image,
             params={"sensor_cfg": SceneEntityCfg("chase_camera")},
         )        
 
+       # Local frame velocities (what the robot "feels")
+        root_lin_vel = ObsTerm(
+            func=mdp.base_lin_vel,  # Local frame
+            params={"asset_cfg": SceneEntityCfg("robot")},
+            scale=0.1
+        )
+        # Robot learns: [forward, lateral, vertical] speeds
+        
+        # root_ang_vel = ObsTerm(
+        #     func=mdp.base_ang_vel,  # Local frame
+        #     params={"asset_cfg": SceneEntityCfg("robot")},
+        #     scale=0.1
+        # )
+        # # Robot learns: [roll, pitch, yaw] rates
+        
+        # Previous actions (action history)
+        last_action = ObsTerm(
+            func=mdp.last_action,
+        )
+
+        # generated_commands = ObsTerm(
+        #     func=mdp.generated_commands,
+        # )
+
         def __post_init__(self) -> None: 
             self.enable_corruption = False
             self.concatenate_terms = False 
 
     policy: PolicyCfg = PolicyCfg() 
-
 
 @configclass
 class EventCfg: 
@@ -189,80 +194,99 @@ class EventCfg:
         params={},  # any extra parameters
     )
 
-
-
 @configclass
 class RewardsCfg:
     """Reward terms for the MDP."""
 
     
     # Reward for staying alive 
+    # Testing done: Trying to keep reward in 0.01 magnitude
     alive = RewTerm(
         func=mdp.is_alive,  # Returns 1 if not terminated
-        weight=0.1
+        weight=1
     )
 
     ## Follow center line reward 
     # distance_to_centerline: DistanceToCenterlineReward = DistanceToCenterlineReward()
+    # Testing done: Tyring to keep reward in 0.1 magnitude 
     distance_to_centerline = RewTerm(
         func=DistanceToCenterlineReward(), 
-        weight=1.0
+        weight=10.0
         )
+    
+    # # Primary: Forward speed in robot's local frame
+    # # Rewards to Forward speed 
+    # # Penalty to Backward speed
+    # Testing done: Trying to keep reward in 0.1 magnitude level  
+    forward_velocity = RewTerm(
+        func=speed_magnitude_reward_local,  
+        weight=10.0
+    )
 
-    ## Positive reward for cars speed 
-    car_vel = RewTerm(
-        func = mdp.joint_vel_l1, 
-        weight = 2.0, 
-        params={"asset_cfg": SceneEntityCfg("robot", 
-                                            joint_names=[
-                                                "Wheel__Knuckle__Front_Left",
-                                                "Wheel__Knuckle__Front_Right",
-                                                "Wheel__Upright__Rear_Right",
-                                                "Wheel__Upright__Rear_Left",
-                                            ])}, 
-        )
+
+    # # ========== PENALTIES ==========
     
-    # ========== PENALTIES ==========
-    
-    # Joint acceleration penalty (smoothness)
+    # # Joint acceleration penalty (smoothness)
+    ## Tested for how change is different scales of acceleration affects the penalty. 
     joint_acc = RewTerm(
         func=mdp.joint_acc_l2,
-        weight=-0.1,
+        weight=-0.00001,
         params={"asset_cfg": SceneEntityCfg("robot")}
     )
 
 
-    # Steering limits penalty
-    joint_limits = RewTerm(
-        func=mdp.joint_pos_limits,
-        weight=-0.15,
-        params={"asset_cfg": SceneEntityCfg("robot",
-                                           joint_names=["Knuckle__Upright__Front_Right",
-                                                       "Knuckle__Upright__Front_Left"])}
+    # # Steering limits penalty
+    ## Not able to find the joint limits.
+    ### Not adding beacuse joint max clip is lower than joint limit. 
+    # joint_limits = RewTerm(
+    #     func=mdp.joint_pos_limits,
+    #     weight=-0.15,
+    #     params={"asset_cfg": SceneEntityCfg("robot",
+    #                                        joint_names=["Knuckle__Upright__Front_Right",
+    #                                                    "Knuckle__Upright__Front_Left"])}
+    # )
+
+    # # Penalty for sudden steering change 
+    ## Testing done. 
+    steering_change = RewTerm(
+        func=mdp.joint_vel_l2,
+        weight=-100,
+        params={
+            "asset_cfg": SceneEntityCfg(
+                "robot",
+                joint_names=["Knuckle__Upright__Front.*"]
+            )
+        }
     )
 
     termination = RewTerm(
         func=mdp.is_terminated,  # Returns 1 when terminated
-        weight=-10.0  # Large negative weight
+        weight=-1200.0  # Large negative weight
     )
-
 
 @configclass
 class TerminationsCfg:
     
-    # If you are adding termination penality in reward, don't add time_out 
+    # If you are adding termination penality in reward, don't add time_out ?
     # time_out = DoneTerm(
     #     func=mdp.time_out, 
     #     time_out=True
-    #     )
+    # )
 
+    # Outside track bounds
     outside_track_bounds = DoneTerm(
         func=outside_track_bounds_termination, 
         params={}
     )
 
-
-
+    # # Car flipped over 
+    # base_contact = DoneTerm(
+    #     func=mdp.illegal_contact,
+    #     params={
+    #         "asset_cfg": SceneEntityCfg("robot"),
+    #         "sensor_cfg": SceneEntityCfg("contact_forces", body_names="Chassis"),
+    #     }
+    # )
 
 @configclass 
 class LeatherbackEnvCfg(ManagerBasedRLEnvCfg): 
@@ -289,3 +313,36 @@ class LeatherbackEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.dt = 1 / 120
         self.sim.render_interval = self.decimation
 
+
+
+# 4. Curriculum learning configuration 
+# @configclass
+# class CurriculumCfg:
+#     """Curriculum learning settings."""
+    
+#     # Start with easier settings
+#     initial_max_speed = 5.0
+#     final_max_speed = 50.0
+    
+#     initial_track_difficulty = 0.2  # Start with wide track bounds
+#     final_track_difficulty = 1.0    # Full difficulty
+    
+#     curriculum_steps = 1000  # Increase difficulty every N episodes
+
+
+# @configclass
+# class DomainRandomizationCfg:
+#     """Domain randomization settings."""
+    
+#     # Randomize friction
+#     friction_range = (0.5, 1.5)
+    
+#     # Randomize mass
+#     mass_range = (0.9, 1.1)  # ±10% mass variation
+    
+#     # Randomize actuator strength
+#     actuator_strength_range = (0.9, 1.1)
+    
+#     # Visual randomization (if using camera)
+#     light_intensity_range = (2500, 3500)
+    

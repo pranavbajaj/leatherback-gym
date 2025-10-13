@@ -21,7 +21,7 @@ from PIL import Image
 from isaaclab.app import AppLauncher
 
 # add argparse arguments
-parser = argparse.ArgumentParser(description="Tutorial on running the cartpole RL environment.")
+parser = argparse.ArgumentParser(description="Tutorial on running the leatherback-track RL environment.")
 parser.add_argument("--num_envs", type=int, default=1, help="Number of environments to spawn.")
 
 # append AppLauncher cli args
@@ -55,8 +55,12 @@ def main():
     curr_action = torch.zeros_like(env.action_manager.action, dtype=torch.float32)
     # print(curr_action.size())
     
-    # curr_action[:, :2] = torch.randint(low=-2, high=3, size=(env_cfg.scene.num_envs, 2), dtype=torch.float32)    # Position, consider scaling factor of 0.1
-    curr_action[:, 2:] = torch.randint(low=3, high=5, size=(env_cfg.scene.num_envs, 4), dtype=torch.float32)
+    curr_action[:, :2] = torch.rand(size=(env_cfg.scene.num_envs, 1), dtype=torch.float32) * 2 - 1    # Position, consider scaling factor of 0.1
+    curr_action[:, 2:] = torch.rand(size=(env_cfg.scene.num_envs, 1), dtype=torch.float32) * 2 -1
+    
+
+    curr_action[:, :2] = 0.0
+    curr_action[:, 2:] = 1.0
 
     # stage = env.sim.stage
     # robot_prim = stage.GetPrimAtPath("/World/envs/env_0/Robot")
@@ -66,6 +70,8 @@ def main():
     #     if "Camera" in prim.GetName() or "camera" in prim.GetName():
     #         print(f"Found camera: {prim.GetPath()}")
 
+
+    # sign = 1 
 
     while simulation_app.is_running():
         with torch.inference_mode():
@@ -78,6 +84,23 @@ def main():
             # sample random actions
 
             obs, rew, terminated, truncated, info = env.step(curr_action)
+
+            # curr_action[:, :2] *= -1
+
+            ## Action printout
+            # processed_actions = env.action_manager.get_term("joint_position").processed_actions
+            # print(f"Processed actions: {processed_actions}")
+            # processed_actions = env.action_manager.get_term("joint_velocity").processed_actions
+            # print(f"Processed actions: {processed_actions}")
+            # print("Current action", curr_action)
+
+            ## Reward Printouts 
+            # reward_terms = env.reward_manager.compute() 
+            # print("Rewards terms: ", reward_terms)
+
+            print("Rewards obs: ", rew)
+
+            # print(obs["policy"]["camera_obs"])
 
             # camera = env.scene["chase_camera"]
             # rgb_data = camera.data.output["rgb"]  # (num_envs, H, W, 3)
