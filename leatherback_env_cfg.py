@@ -170,9 +170,9 @@ class ObservationsCfg:
         # # Robot learns: [roll, pitch, yaw] rates
         
         # Previous actions (action history)
-        last_action = ObsTerm(
-            func=mdp.last_action,
-        )
+        # last_action = ObsTerm(
+        #     func=mdp.last_action,
+        # )
 
         # generated_commands = ObsTerm(
         #     func=mdp.generated_commands,
