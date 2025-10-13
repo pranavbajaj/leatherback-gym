@@ -35,7 +35,7 @@ simulation_app = app_launcher.app
 
 
 import torch
-
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 from isaaclab.envs import ManagerBasedRLEnv
 
 from leatherback_env_cfg import * 
@@ -53,14 +53,15 @@ def main():
     print(f"Env_0 Origin: {env.scene.env_origins[0, :3]}")
 
     curr_action = torch.zeros_like(env.action_manager.action, dtype=torch.float32)
-    # print(curr_action.size())
+    print("Action: ", env.action_manager)
+    print(curr_action.size())
     
     curr_action[:, :2] = torch.rand(size=(env_cfg.scene.num_envs, 1), dtype=torch.float32) * 2 - 1    # Position, consider scaling factor of 0.1
-    curr_action[:, 2:] = torch.rand(size=(env_cfg.scene.num_envs, 1), dtype=torch.float32) * 2 -1
+    curr_action[:, 2:] = torch.rand(size=(env_cfg.scene.num_envs, 1), dtype=torch.float32) * 2 - 1
     
 
     curr_action[:, :2] = 0.0
-    curr_action[:, 2:] = 1.0
+    curr_action[:, 2:] = 0.5
 
     # stage = env.sim.stage
     # robot_prim = stage.GetPrimAtPath("/World/envs/env_0/Robot")
@@ -85,6 +86,9 @@ def main():
 
             obs, rew, terminated, truncated, info = env.step(curr_action)
 
+            # print("Terminated: \n", terminated)
+            
+
             # curr_action[:, :2] *= -1
 
             ## Action printout
@@ -100,7 +104,8 @@ def main():
 
             print("Rewards obs: ", rew)
 
-            # print(obs["policy"]["camera_obs"])
+            # print(obs["policy"]["wheel_vel"])
+            # print(obs["policy"]["steering_pos"])
 
             # camera = env.scene["chase_camera"]
             # rgb_data = camera.data.output["rgb"]  # (num_envs, H, W, 3)

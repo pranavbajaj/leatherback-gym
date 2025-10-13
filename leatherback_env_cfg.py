@@ -28,7 +28,7 @@ from rewards.speed_reward import speed_magnitude_reward_local
 
 RC_CONFIG = ArticulationCfg(
     spawn = sim_utils.UsdFileCfg(
-        usd_path=f"{ISAAC_NUCLEUS_DIR}/Robots/Leatherback/leatherback.usd",
+        usd_path=f"{ISAAC_NUCLEUS_DIR}/Robots/NVIDIA/Leatherback/leatherback.usd",
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             rigid_body_enabled=True,
             max_linear_velocity=1000.0,
@@ -142,12 +142,12 @@ class ObservationsCfg:
         )
 
         # Wheel velocities
-        # wheel_vel = ObsTerm(
-        #     func=mdp.joint_vel_rel,
-        #     params={"asset_cfg": SceneEntityCfg("robot", 
-        #                                       joint_names=["Wheel.*"])},
-        #     scale=1.0/30.0
-        # )
+        wheel_vel = ObsTerm(
+            func=mdp.joint_vel_rel,
+            params={"asset_cfg": SceneEntityCfg("robot", 
+                                              joint_names=["Wheel.*"])},
+            scale=1.0/30.0
+        )
 
         camera_obs = ObsTerm(
             func=mdp.image,
@@ -155,11 +155,11 @@ class ObservationsCfg:
         )        
 
        # Local frame velocities (what the robot "feels")
-        root_lin_vel = ObsTerm(
-            func=mdp.base_lin_vel,  # Local frame
-            params={"asset_cfg": SceneEntityCfg("robot")},
-            scale=0.1
-        )
+        # root_lin_vel = ObsTerm(
+        #     func=mdp.base_lin_vel,  # Local frame
+        #     params={"asset_cfg": SceneEntityCfg("robot")},
+        #     scale=1.0
+        # )
         # Robot learns: [forward, lateral, vertical] speeds
         
         # root_ang_vel = ObsTerm(
