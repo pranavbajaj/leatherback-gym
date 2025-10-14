@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn 
 import torch.optim as optim 
 from torchvision import models 
+from torch.distributed import Normal
 
 
 class PerceptionEncoder(nn.Module): 
@@ -64,7 +65,7 @@ class VelocityObsEncoder(nn.Module):
 
 class ActionDecoder(nn.Module): 
     
-    def __init__(self, ):
+    def __init__(self, n_actions):
         super(ActionDecoder, self).__init__()
         
         self.fc = nn.Sequential(nn.Linear(2024, 512),
@@ -73,8 +74,8 @@ class ActionDecoder(nn.Module):
                                 nn.ReLU(), 
                                 nn.Linear(128,32),
                                 nn.ReLU(), 
-                                nn.Linear(32,2),
-                                nn.Sigmoid()
+                                nn.Linear(32,n_actions),
+                                nn.Tanh()
                                 )
         
     def forward(self, x1, x2, x3): 
@@ -85,13 +86,15 @@ class ActionDecoder(nn.Module):
         
 class AgentNNetwork(nn.Module): 
     
-    def __init__(self, ): 
+    def __init__(self, n_actions): 
         super(AgentNNetwork, self).__init__()
         
         self.perceptionEncoder = PerceptionEncoder()
         self.steerEncoder = SteerObsEncoder() 
         self.velocityEncoder = VelocityObsEncoder() 
-        self.actionDecoder = ActionDecoder() 
+        self.actionDecoder = ActionDecoder(n_actions) 
+        self.log_std = nn.Parameter(torch.zeros(n_actions))
+        
         
     def forward(self, x_img, x_s, x_v):
         
@@ -99,12 +102,15 @@ class AgentNNetwork(nn.Module):
         x2 = self.steerEncoder(x_s)
         x3 = self.velocityEncoder(x_v)
         
-        return self.actionDecoder(x1, x2, x3)
+        mean = self.actionDecoder(x1, x2, x3)
+        std = torch.exp(self.log_std)
+        
+        return mean, std
         
         
 class DriveAgent():
-    def __init__(self, lr = 0.001, gamma = 0.99):
-        self.policy = AgentNNetwork() 
+    def __init__(self, n_actions = 2, lr = 0.001, gamma = 0.99):
+        self.policy = AgentNNetwork(n_actions) 
         self.optimizer = optim.Adagrad(self.policy.parameters(), lr = lr)
         self.gamma = gamma 
         
@@ -114,7 +120,10 @@ class DriveAgent():
         obs_s = obs_manager["policy"]["steering_pos"]
         obs_v = obs_manager["policy"]["wheel_vel"]
         
-        actions = self.policy(obs_img, obs_s, obs_v)
+        actions_mean, actions_std = self.policy(obs_img, obs_s, obs_v)
+        
+        actions = Normal(actions_mean, actions_std)
+        
         # Converting it isaaclab env formate 
         actions_env = torch.zeros_like(env.action_manager.action, dtype=torch.float32)
         actions_env[:,:2] = actions[:,0]
