@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn 
 import torch.optim as optim 
 from torchvision import models 
-from torch.distributed import Normal
+from torch.distributions import *
 
 
 class PerceptionEncoder(nn.Module): 
@@ -37,7 +37,7 @@ class SteerObsEncoder(nn.Module):
     def __init__(self,): 
         super(SteerObsEncoder, self).__init__()
         
-        self.fc = nn.Sequential(nn.Linear(1,128), 
+        self.fc = nn.Sequential(nn.Linear(2,128), 
                                 nn.ReLU(), 
                                 nn.Linear(128, 256), 
                                 nn.ReLU(),
@@ -52,7 +52,7 @@ class VelocityObsEncoder(nn.Module):
     def __init__(self,): 
         super(VelocityObsEncoder, self).__init__()
         
-        self.fc = nn.Sequential(nn.Linear(2,128),
+        self.fc = nn.Sequential(nn.Linear(4,128),
                                 nn.ReLU(), 
                                 nn.Linear(128,256),
                                 nn.ReLU(),
@@ -65,71 +65,99 @@ class VelocityObsEncoder(nn.Module):
 
 class ActionDecoder(nn.Module): 
     
-    def __init__(self, n_actions):
+    def __init__(self):
         super(ActionDecoder, self).__init__()
         
-        self.fc = nn.Sequential(nn.Linear(2024, 512),
+        self.fc_steer = nn.Sequential(nn.Linear(2024, 512),
                                 nn.ReLU(), 
                                 nn.Linear(512,128),
                                 nn.ReLU(), 
                                 nn.Linear(128,32),
                                 nn.ReLU(), 
-                                nn.Linear(32,n_actions),
-                                nn.Tanh()
+                                nn.Linear(32,3),
+                                nn.Softmax()
+                                )
+        
+        self.fc_vel = nn.Sequential(nn.Linear(2024, 512),
+                                nn.ReLU(), 
+                                nn.Linear(512,128),
+                                nn.ReLU(), 
+                                nn.Linear(128,32),
+                                nn.ReLU(), 
+                                nn.Linear(32,2),
+                                nn.Softmax()
                                 )
         
     def forward(self, x1, x2, x3): 
         x = torch.cat((x1, x2, x3), dim = 1)
-        x_out = self.fc(x)
-        return x_out
+        x_steer_out = self.fc_steer(x)
+        x_val_out = self.fc_vel(x)
+        return x_steer_out, x_val_out
         
         
 class AgentNNetwork(nn.Module): 
     
-    def __init__(self, n_actions): 
+    def __init__(self,): 
         super(AgentNNetwork, self).__init__()
         
         self.perceptionEncoder = PerceptionEncoder()
         self.steerEncoder = SteerObsEncoder() 
         self.velocityEncoder = VelocityObsEncoder() 
-        self.actionDecoder = ActionDecoder(n_actions) 
-        self.log_std = nn.Parameter(torch.zeros(n_actions))
+        self.actionDecoder = ActionDecoder() 
         
         
     def forward(self, x_img, x_s, x_v):
         
         x1 = self.perceptionEncoder(x_img)
         x2 = self.steerEncoder(x_s)
-        x3 = self.velocityEncoder(x_v)
-        
-        mean = self.actionDecoder(x1, x2, x3)
-        std = torch.exp(self.log_std)
-        
-        return mean, std
+        x3 = self.velocityEncoder(x_v)        
+        x_steer_out, x_val_out = self.actionDecoder(x1, x2, x3)
+
+        return x_steer_out, x_val_out
         
         
 class DriveAgent():
-    def __init__(self, n_actions = 2, lr = 0.001, gamma = 0.99):
-        self.policy = AgentNNetwork(n_actions) 
+    def __init__(self, lr = 0.001, gamma = 0.99):
+        self.policy = AgentNNetwork() 
         self.optimizer = optim.Adagrad(self.policy.parameters(), lr = lr)
         self.gamma = gamma 
         
-    def get_action(self, env, obs_manager):
+    def get_policy(self, obs_img, obs_s, obs_v):
         
-        obs_img = obs_manager["policy"]["camera_obs"]
-        obs_s = obs_manager["policy"]["steering_pos"]
-        obs_v = obs_manager["policy"]["wheel_vel"]
+        steer_action_logit, vel_action_logit = self.policy(obs_img, obs_s, obs_v)
+
+        steer_dist = Categorical(steer_action_logit)
+        vel_dist = Categorical(vel_action_logit)
+
+        return steer_dist, vel_dist
+    
+    def get_action(self, obs_img, obs_s, obs_v): 
+        steer_dist, vel_dist = self.get_policy(obs_img, obs_s, obs_v)
+        return steer_dist.sample(), vel_dist.sample()
+    
+    def map_actions(self, steer_acts, vel_acts): 
         
-        actions_mean, actions_std = self.policy(obs_img, obs_s, obs_v)
+        ## Revise this. steer_acts and vel_acts are not int, they are torch.tensor array of ints  
         
-        actions = Normal(actions_mean, actions_std)
+        steer_vals = []
+        vel_vals = []
+
+        for i in range(len(steer_acts)): 
+            steer_val = 0.0 
+            if steer_acts[i] == 0: 
+                steer_val = -0.75
+            elif steer_acts[i] == 2: 
+                steer_val = 0.75
+
+            vel_val = 0.0
+            if vel_acts[i] == 1: 
+                vel_val = 0.75
+
+            steer_vals.append(steer_val)
+            vel_vals.append(vel_val)
         
-        # Converting it isaaclab env formate 
-        actions_env = torch.zeros_like(env.action_manager.action, dtype=torch.float32)
-        actions_env[:,:2] = actions[:,0]
-        actions_env[:,2:] = actions[:,1]
-        
-        return actions_env 
+        return torch.tensor(steer_vals, dtype=torch.float32).unsqueeze(-1), torch.tensor(vel_vals, dtype=torch.float32).unsqueeze(-1)
+
         
     def compute_return(self, rewards):
         Returns = [0]
@@ -138,6 +166,22 @@ class DriveAgent():
         Returns.reverse()
         return Returns[:-1] 
         
-    def update(self, log_probs, returns):
-        pass 
+    def update(self, steer_log_probs, vel_log_probs, returns):
+        policy_loss = -(steer_log_probs * returns).mean()-(vel_log_probs * returns).mean()
+        self.optimizer.zero_grad()
+        policy_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.policy.parameters(), max_norm=1.0)
+        self.optimizer.step()
+        
+        return policy_loss.item()
     
+    def save(self, filepath):
+        torch.save({
+            'policy_state_dict': self.policy.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+        }, filepath)
+    
+    def load(self, filepath):
+        checkpoint = torch.load(filepath)
+        self.policy.load_state_dict(checkpoint['policy_state_dict'])
+        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])

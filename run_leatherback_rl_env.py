@@ -102,7 +102,7 @@ def main():
             # reward_terms = env.reward_manager.compute() 
             # print("Rewards terms: ", reward_terms)
 
-            print("Rewards obs: ", rew)
+            print("Rewards obs: ", rew[0])
 
             # print(obs["policy"]["wheel_vel"])
             # print(obs["policy"]["steering_pos"])

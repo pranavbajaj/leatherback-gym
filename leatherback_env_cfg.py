@@ -28,7 +28,8 @@ from rewards.speed_reward import speed_magnitude_reward_local
 
 RC_CONFIG = ArticulationCfg(
     spawn = sim_utils.UsdFileCfg(
-        usd_path=f"{ISAAC_NUCLEUS_DIR}/Robots/NVIDIA/Leatherback/leatherback.usd",
+        usd_path=f"{ISAAC_NUCLEUS_DIR}/Robots/Leatherback/leatherback.usd",
+        # usd_path=f"{ISAAC_NUCLEUS_DIR}/Robots/NVIDIA/Leatherback/leatherback.usd",
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             rigid_body_enabled=True,
             max_linear_velocity=1000.0,
@@ -268,10 +269,10 @@ class RewardsCfg:
 class TerminationsCfg:
     
     # If you are adding termination penality in reward, don't add time_out ?
-    # time_out = DoneTerm(
-    #     func=mdp.time_out, 
-    #     time_out=True
-    # )
+    time_out = DoneTerm(
+        func=mdp.time_out, 
+        time_out=True
+    )
 
     # Outside track bounds
     outside_track_bounds = DoneTerm(
