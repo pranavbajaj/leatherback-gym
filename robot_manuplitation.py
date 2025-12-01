@@ -82,7 +82,7 @@ class RobotState:
         - goal_pos (3)
         """
         # HINT: Use torch.cat() along dimension -1
-        return torch.cat([self.joint_pos, self.joint_vel, self.ee_pos, self.ee_quat, self.ee_quat, self.goal_pos], dim = -1)
+        return torch.cat([self.joint_pos, self.joint_vel, self.ee_pos, self.ee_quat, self.goal_pos], dim = -1)
 
 
 class RunningNormalizer:
@@ -130,13 +130,12 @@ class RunningNormalizer:
         batch_var = torch.var(x, dim = 0)
         batch_count = torch.tensor(x.size()[0], device = self.device)
 
+        delta = batch_mean - self.mean
         new_count = self.count + batch_count
 
-        self.mean = self.mean + (batch_count / new_count) * batch_mean
+        self.mean = self.mean + (batch_count / new_count) * delta
         self.var = (self.var * self.count + batch_var * batch_count) / new_count
         self.count = new_count
-
-
 
         
     def normalize(self, x: torch.Tensor) -> torch.Tensor:
@@ -233,8 +232,8 @@ class RewardComputer:
 
         # Goal distance reward 
         ## Check_________ the gaussian reward 
-        distance = torch.norm((robot_state.ee_pos, robot_state.goal_pos), dim = -1)
-        goal_distance_reward = torch.exp(5 * distance)
+        distance = torch.norm(robot_state.ee_pos - robot_state.goal_pos, dim = -1)
+        goal_distance_reward = torch.exp(-5.0 * distance)
 
         # Smoothness reward 
         smoothness_reward = -1.0 * torch.norm((actions - self.prev_action), dim = -1)
@@ -248,11 +247,13 @@ class RewardComputer:
         success_bonus[mask] = 10.0
 
         
+                
         # Combined Rewards 
         combined_rewards = self.goal_distacne_weigth * goal_distance_reward + self.smoothness_weight * smoothness_reward + self.energy_weight * energy_efficiency_reward + success_bonus
 
         # Update prev_actions 
-        self.prev_action = actions
+        ## Remember to copy and detach output whenever you copy an output from a neural network
+        self.prev_action = actions.clone().detach() 
 
         # Returns:
         #     Dict containing:
@@ -298,6 +299,8 @@ class RewardComputer:
             self.runningNormalizer.update(state_vector)
 
         state_vector = self.runningNormalizer.normalize(state_vector)
+        
+        return state_vector
 
         
 
@@ -321,11 +324,13 @@ class MultiEnvironmentManager:
         """
         self.config = config
         self.device = config.device
-        self.robot_state = RobotState(batch_size=config.num_envs, num_joints=config.num_joints)
+        self.robot_state = RobotState(batch_size=config.num_envs, num_joints=config.num_joints, device=self.device)
         self.rewardComputer = RewardComputer(config=config)
         self.episode_steps = torch.zeros((config.num_envs), dtype=torch.int, device = self.device)
         self.episode_rewards = torch.zeros((config.num_envs), dtype=torch.float32, device = self.device)
         self.max_episode_steps = 500
+        self._env_ids = torch.arange(self.config.num_envs, device=self.device) 
+        
         
     def reset_environments(self, env_ids: Optional[torch.Tensor] = None) -> Dict[str, torch.Tensor]:
         """
@@ -353,7 +358,7 @@ class MultiEnvironmentManager:
         """
         # Check env ids, if None, reset all envs 
         if env_ids == None: 
-            env_ids = torch.tensor([i for i in range(self.config.num_envs)]) 
+            env_ids = self._env_ids
 
         # Get num of env to reset 
         num_reset = env_ids.size()[0]
@@ -367,10 +372,10 @@ class MultiEnvironmentManager:
 
         # Initialized end-effector pos 
         # Check________Below
-        self.robot_state.ee_pos[env_ids] = torch.mean(self.robot_state.joint_pos[env_ids], dim = -1).expand(num_reset, 3)
+        self.robot_state.ee_pos[env_ids] = torch.mean(self.robot_state.joint_pos[env_ids], dim = -1, keepdim=True).expand(num_reset, 3)
         # Init ee-quat 
         self.robot_state.ee_quat[env_ids] = torch.zeros((num_reset, 4), dtype=torch.float32, device = self.device)
-        self.robot_state.ee_quat[env_ids][0] = 1.0
+        self.robot_state.ee_quat[env_ids, 0] = 1.0
 
         # Reset episode tracking (steps, rewards to 0)
         self.episode_rewards[env_ids] = 0.0
@@ -432,14 +437,22 @@ class MultiEnvironmentManager:
         self.robot_state.ee_pos = self.robot_state.joint_pos[:, :3]
 
         # Compute Rewards 
-        self.rewardComputer.
-
-
-
-
-
-
-
+        step_reward_dict = self.rewardComputer.compute_rewards(robot_state=self.robot_state, actions=actions)
+        total_reward = step_reward_dict["total_reward"]
+        self.episode_rewards += total_reward
+        
+        # Episode Tracking 
+        self.episode_steps += 1
+        
+        # Check Termination 
+        done = self.episode_steps >= self.max_episode_steps
+        
+        # Get dont Env_ID 
+        done_evn_ID = self._env_ids[done]
+        self.reset_environments(done_evn_ID)
+        
+        return (self._get_observations(), total_reward, done)
+        
 
     
     def _get_observations(self) -> Dict[str, torch.Tensor]:
@@ -453,7 +466,13 @@ class MultiEnvironmentManager:
         - reward_computer.normalize_state() with update=True
         - Compute goal distance metric using compute_rewards
         """
-        pass
+        normalized_state = self.rewardComputer.normalize_state(self.robot_state, update=True)
+        
+        return {
+            'state': normalized_state
+        }
+        
+        
 
 
 # ============================================================================
